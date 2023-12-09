@@ -8,36 +8,39 @@
     @click="toList"
   >
     <template #header>
-      <Transition name="fade" mode="out-in">
-        <template v-if="!hotListData">
-          <div class="loading">
-            <n-skeleton text round />
-          </div>
-        </template>
-        <template v-else>
-          <div class="title">
-            <n-avatar
-              class="ico"
-              :src="`/logo/${hotType}.png`"
-              fallback-src="/ico/icon_error.png"
-            />
-            <n-text class="name">{{ hotListData.title }}</n-text>
-            <n-text class="subtitle" :depth="2">
-              {{ hotListData.subtitle }}
-            </n-text>
-          </div>
-        </template>
-      </Transition>
+      <n-space class="title" justify="space-between">
+        <div class="name">
+          <n-avatar
+            class="ico"
+            :src="`/logo/${hotData.name}.png`"
+            fallback-src="/ico/icon_error.png"
+          />
+          <n-text class="name-text">{{ hotData.label }}</n-text>
+        </div>
+        <n-text v-if="hotListData?.subtitle" class="subtitle" :depth="2">
+          {{ hotListData.subtitle }}
+        </n-text>
+        <n-skeleton v-else width="60px" text round />
+      </n-space>
     </template>
     <n-scrollbar class="news-list" ref="scrollbarRef">
       <Transition name="fade" mode="out-in">
-        <template v-if="!hotListData || listLoading">
+        <template v-if="loadingError">
+          <n-result
+            size="small"
+            status="500"
+            title="哎呀，加载失败了"
+            description="生活总会遇到不如意的事情"
+            style="margin-top: 40px"
+          />
+        </template>
+        <template v-else-if="!hotListData || listLoading">
           <div class="loading">
             <n-skeleton text round :repeat="10" height="20px" />
           </div>
         </template>
         <template v-else>
-          <div class="lists" :id="hotType + 'Lists'">
+          <div class="lists" :id="hotData.name + 'Lists'">
             <div
               class="item"
               v-for="(item, index) in hotListData.data.slice(0, 15)"
@@ -57,7 +60,11 @@
                 :depth="2"
                 >{{ index + 1 }}</n-text
               >
-              <n-text class="text" @click.stop="jumpLink(item)">
+              <n-text
+                :style="{ fontSize: store.listFontSize + 'px' }"
+                class="text"
+                @click.stop="jumpLink(item)"
+              >
                 {{ item.title }}
               </n-text>
             </div>
@@ -129,10 +136,10 @@ import { useRouter } from "vue-router";
 const router = useRouter();
 const store = mainStore();
 const props = defineProps({
-  // 热榜类别
-  hotType: {
-    type: String,
-    default: null,
+  // 热榜数据
+  hotData: {
+    type: Object,
+    default: {},
   },
 });
 
@@ -140,29 +147,38 @@ const props = defineProps({
 const updateTime = ref(null);
 
 // 刷新按钮数据
-const lastClickTime = ref(localStorage.getItem(`${props.hotType}Btn`) || 0);
+const lastClickTime = ref(
+  localStorage.getItem(`${props.hotData.name}Btn`) || 0
+);
 
 // 热榜数据
 const hotListData = ref(null);
 const scrollbarRef = ref(null);
 const listLoading = ref(false);
+const loadingError = ref(false);
 
 // 获取热榜数据
-const getHotListsData = (type, isNew = false) => {
-  // hotListData.value = null;
-  getHotLists(type, isNew).then((res) => {
-    console.log(res);
-    if (res.code === 200) {
+const getHotListsData = async (type, isNew = false) => {
+  try {
+    // hotListData.value = null;
+    loadingError.value = false;
+    const result = await getHotLists(type, isNew);
+    // console.log(result);
+    if (result.code === 200) {
       listLoading.value = false;
-      hotListData.value = res;
+      hotListData.value = result;
       // 滚动至顶部
       if (scrollbarRef.value) {
         scrollbarRef.value.scrollTo({ position: "top", behavior: "smooth" });
       }
     } else {
-      $message.error(res.title + res.message);
+      loadingError.value = true;
+      $message.error(result.title + result.message);
     }
-  });
+  } catch (error) {
+    loadingError.value = true;
+    $message.error("热榜加载失败，请重试");
+  }
 };
 
 // 获取最新数据
@@ -171,10 +187,10 @@ const getNewData = () => {
   if (now - lastClickTime.value > 60000) {
     // 点击事件
     listLoading.value = true;
-    getHotListsData(props.hotType, true);
+    getHotListsData(props.hotData.name, true);
     // 更新最后一次点击时间
     lastClickTime.value = now;
-    localStorage.setItem(`${props.hotType}Btn`, now);
+    localStorage.setItem(`${props.hotData.name}Btn`, now);
   } else {
     // 不执行点击事件
     $message.info("请稍后再刷新");
@@ -194,11 +210,11 @@ const jumpLink = (data) => {
 
 // 前往全部列表
 const toList = () => {
-  if (props.hotType) {
+  if (props.hotData.name) {
     router.push({
       path: "/list",
       query: {
-        type: props.hotType,
+        type: props.hotData.name,
       },
     });
   } else {
@@ -217,7 +233,7 @@ watch(
 );
 
 onMounted(() => {
-  if (props.hotType) getHotListsData(props.hotType);
+  if (props.hotData.name) getHotListsData(props.hotData.name);
 });
 </script>
 
@@ -226,6 +242,7 @@ onMounted(() => {
   border-radius: 12px;
   transition: all 0.3s;
   cursor: pointer;
+
   .fade-enter-active,
   .fade-leave-active {
     transition: opacity 0.3s ease-in-out;
@@ -235,37 +252,48 @@ onMounted(() => {
   .fade-leave-to {
     opacity: 0;
   }
+
   .title {
     display: flex;
     align-items: center;
     font-size: 16px;
     height: 26px;
-    .n-avatar {
-      background-color: transparent;
-      width: 20px;
-      height: 20px;
-      margin-right: 8px;
+    .name {
+      display: flex;
+      align-items: center;
+      .n-avatar {
+        background-color: transparent;
+        width: 20px;
+        height: 20px;
+        margin-right: 8px;
+      }
     }
+
     .subtitle {
       margin-left: auto;
       font-size: 12px;
     }
   }
+
   .message {
     display: flex;
     align-items: flex-end;
     justify-content: space-between;
     font-size: 12px;
     height: 24px;
+
     .time {
       padding: 0 6px;
     }
   }
+
   :deep(.news-list) {
     height: 300px;
+
     .n-scrollbar-rail {
       right: 0;
     }
+
     .loading {
       display: flex;
       flex-direction: column;
@@ -273,8 +301,10 @@ onMounted(() => {
       justify-content: space-between;
     }
   }
+
   .lists {
     padding-right: 6px;
+
     .item {
       display: flex;
       align-items: center;
@@ -284,9 +314,11 @@ onMounted(() => {
       border-radius: 8px;
       transition: all 0.3s;
       cursor: pointer;
+
       &:nth-last-of-type(1) {
         margin-bottom: 0;
       }
+
       .num {
         width: 24px;
         height: 24px;
@@ -299,40 +331,49 @@ onMounted(() => {
         background-color: var(--n-border-color);
         border-radius: 8px;
         transition: all 0.3s;
+
         &:hover {
           background-color: var(--n-close-color-hover);
         }
+
         &.one {
           background-color: #ea444d;
           color: #fff;
         }
+
         &.two {
           background-color: #ed702d;
           color: #fff;
         }
+
         &.three {
           background-color: #eead3f;
           color: #fff;
         }
       }
+
       .text {
         position: relative;
         display: inline-block;
         width: 100%;
         transition: all 0.3s;
+
         @media (min-width: 768px) {
           &:hover {
             transform: translateX(4px);
+
             &::after {
               width: 90%;
             }
           }
         }
+
         @media (max-width: 768px) {
           &:active {
             color: #ea444d;
           }
         }
+
         &::after {
           content: "";
           width: 0;
@@ -348,11 +389,13 @@ onMounted(() => {
       }
     }
   }
+
   :deep(.n-card-header) {
     .loading {
       height: 26px;
     }
   }
+
   :deep(.n-card__footer) {
     .loading {
       height: 24px;
